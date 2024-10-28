@@ -34,7 +34,7 @@
 		[documentView.leadingAnchor constraintEqualToAnchor:scrollView.contentView.leadingAnchor],
 		[documentView.trailingAnchor constraintEqualToAnchor:scrollView.contentView.trailingAnchor],
 
-		[textField.topAnchor constraintEqualToAnchor:documentView.topAnchor],
+		[textField.topAnchor constraintEqualToAnchor:documentView.topAnchor constant:5],
 		[textField.bottomAnchor constraintLessThanOrEqualToAnchor:documentView.bottomAnchor constant:-10],
 		[textField.leadingAnchor constraintEqualToAnchor:documentView.leadingAnchor constant:10],
 		[textField.trailingAnchor constraintEqualToAnchor:documentView.trailingAnchor constant:-10],
