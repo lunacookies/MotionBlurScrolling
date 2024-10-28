@@ -1,0 +1,51 @@
+#!/bin/sh
+
+set -e
+
+clang-format -i Source/*.m Source/*.h
+
+rm -rf "Build"
+mkdir -p "Build/Motion Blur Scrolling.app/Contents"
+mkdir -p "Build/Motion Blur Scrolling.app/Contents/MacOS"
+mkdir -p "Build/Motion Blur Scrolling.app/Contents/Resources/en.lproj"
+
+plutil \
+	-convert binary1 \
+	-o "Build/Motion Blur Scrolling.app/Contents/Info.plist" \
+	"Data/Info.json"
+
+plutil -convert binary1 \
+	-o "Build/Motion Blur Scrolling.app/Contents/Resources/en.lproj/InfoPlist.strings" \
+	"Data/InfoPlist.json"
+
+cp "Data/Text.txt" "Build/Motion Blur Scrolling.app/Contents/Resources/Text.txt"
+
+clang \
+	-fmodules -fobjc-arc \
+	-g \
+	-fsanitize=undefined \
+	-W \
+	-Wall \
+	-Wextra \
+	-Wpedantic \
+	-Wconversion \
+	-Wimplicit-fallthrough \
+	-Wmissing-prototypes \
+	-Wshadow \
+	-Wstrict-prototypes \
+	-o "Build/Motion Blur Scrolling.app/Contents/MacOS/Motion Blur Scrolling" \
+	"Source/EntryPoint.m"
+
+plutil \
+	-convert xml1 \
+	-o "Build/Motion Blur Scrolling.entitlements" \
+	"Data/Entitlements.json"
+
+plutil \
+	-insert "com\.apple\.security\.get-task-allow" -bool YES \
+	"Build/Motion Blur Scrolling.entitlements"
+
+codesign \
+	--sign - \
+	--entitlements "Build/Motion Blur Scrolling.entitlements" \
+	--options runtime "Build/Motion Blur Scrolling.app/Contents/MacOS/Motion Blur Scrolling"

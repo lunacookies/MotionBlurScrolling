@@ -1,0 +1,2 @@
+@interface MainViewController : NSViewController
+@end

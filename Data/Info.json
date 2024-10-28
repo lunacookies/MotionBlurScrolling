@@ -1,0 +1,14 @@
+{
+	"CFBundleInfoDictionaryVersion": "6.0",
+	"CFBundleIdentifier": "org.xoria.MotionBlurScrolling",
+	"CFBundlePackageType": "APPL",
+	"CFBundleExecutable": "Motion Blur Scrolling",
+
+	"CFBundleName": "Motion Blur Scrolling",
+	"CFBundleDisplayName": "Motion Blur Scrolling",
+
+	"CFBundleDevelopmentRegion": "en",
+	"CFBundleShortVersionString": "1.0.0",
+	"CFBundleVersion": "1.0.0",
+	"NSHumanReadableCopyright": "Copyright © 2024 Luna Razzaghipour"
+}
