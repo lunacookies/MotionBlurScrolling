@@ -2,6 +2,7 @@
 	NSAttributedString *_attributedString;
 	IOSurfaceRef _frontBuffer;
 	IOSurfaceRef _backBuffer;
+	CGFloat _scrollOffset;
 }
 
 + (instancetype)scrollViewWithAttributedString:(NSAttributedString *)attributedString {
@@ -82,9 +83,11 @@
 	CGSize frameSize =
 	        CTFramesetterSuggestFrameSizeWithConstraints(framesetter, (CFRange){0}, NULL, frameSizeConstraints, NULL);
 
+	_scrollOffset = simd_clamp(_scrollOffset, 0, simd_max(0, frameSize.height - sizeNS.height + 5 + 10));
+
 	CGRect frameRect = {0};
 	frameRect.origin.x = 10;
-	frameRect.origin.y = sizeNS.height - frameSize.height - 5;
+	frameRect.origin.y = sizeNS.height - frameSize.height - 5 + _scrollOffset;
 	frameRect.size = frameSize;
 
 	CGPathRef path = CGPathCreateWithRect(frameRect, NULL);
@@ -103,6 +106,11 @@
 	_frontBuffer = _backBuffer;
 	_backBuffer = tmp;
 	self.layer.contents = (__bridge id)_frontBuffer;
+}
+
+- (void)scrollWheel:(NSEvent *)event {
+	_scrollOffset -= event.scrollingDeltaY;
+	self.needsDisplay = YES;
 }
 
 @end
