@@ -2,7 +2,7 @@
 
 set -e
 
-clang-format -i Source/*.m Source/*.h
+clang-format -i Source/*.m Source/*.h Source/*.metal
 
 rm -rf "Build"
 mkdir -p "Build/Motion Blur Scrolling.app/Contents"
@@ -49,3 +49,7 @@ codesign \
 	--sign - \
 	--entitlements "Build/Motion Blur Scrolling.entitlements" \
 	--options runtime "Build/Motion Blur Scrolling.app/Contents/MacOS/Motion Blur Scrolling"
+
+xcrun metal \
+	-o "Build/Motion Blur Scrolling.app/Contents/Resources/default.metallib" \
+	"Source/Shaders.metal"
