@@ -54,7 +54,7 @@ struct Arguments {
 
 - (void)updateLayer {
 	float scaleFactor = (float)self.window.backingScaleFactor;
-	NSSize sizeNS = self.frame.size;
+	NSSize sizeNS = self.bounds.size;
 	simd_float2 sizePixelsFloat = (simd_float2){(float)sizeNS.width, (float)sizeNS.height} * scaleFactor;
 	simd_long2 sizePixels = simd_long(sizePixelsFloat);
 
@@ -175,8 +175,6 @@ struct Arguments {
 
 	[encoder setRenderPipelineState:_pipelineState];
 
-	_scrollOffset = simd_clamp(_scrollOffset, simd_min(0, sizeNS.height - _documentViewSize.y), 0);
-
 	Arguments arguments = {0};
 	arguments.documentViewTexture = _cachedDocumentViewTexture.gpuResourceID;
 	arguments.documentViewOrigin.y = scaleFactor * (float)_scrollOffset;
@@ -205,6 +203,7 @@ struct Arguments {
 
 - (void)scrollWheel:(NSEvent *)event {
 	_scrollOffset -= event.scrollingDeltaY;
+	_scrollOffset = simd_clamp(_scrollOffset, simd_min(0, self.bounds.size.height - _documentViewSize.y), 0);
 	self.needsDisplay = YES;
 }
 
