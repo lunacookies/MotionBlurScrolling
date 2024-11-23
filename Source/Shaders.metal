@@ -60,7 +60,10 @@ fragment Fragment Clear(Fragment frag, constant ClearArguments &arguments) {
 }
 
 fragment Fragment Accumulate(Fragment frag) {
-	frag.accumulationColor += frag.subframeColor;
+	float4 color = frag.subframeColor;
+	color.rgb /= color.a;
+	color.rgb = pow(color.rgb, 2.2);
+	frag.accumulationColor += color;
 	return frag;
 }
 
@@ -70,5 +73,7 @@ struct DivideArguments {
 
 fragment Fragment Divide(Fragment frag, constant DivideArguments &arguments) {
 	frag.outputColor = frag.accumulationColor / arguments.subframeCount;
+	frag.outputColor.rgb = pow(frag.outputColor.rgb, 1.f / 2.2);
+	frag.outputColor.rgb *= frag.outputColor.a;
 	return frag;
 }
