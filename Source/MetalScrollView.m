@@ -6,22 +6,40 @@ struct Arguments {
 	simd_float2 resolution;
 };
 
+typedef struct ClearArguments ClearArguments;
+struct ClearArguments {
+	simd_float4 clearColor;
+};
+
+typedef struct DivideArguments DivideArguments;
+struct DivideArguments {
+	float subframeCount;
+};
+
 @implementation MetalScrollView {
 	NSAttributedString *_attributedString;
 
 	id<MTLDevice> _device;
 	id<MTLCommandQueue> _commandQueue;
 	id<MTLRenderPipelineState> _pipelineState;
+	id<MTLRenderPipelineState> _clearPipelineState;
+	id<MTLRenderPipelineState> _accumulatePipelineState;
+	id<MTLRenderPipelineState> _dividePipelineState;
 
 	IOSurfaceRef _frontBuffer;
 	id<MTLTexture> _frontBufferTexture;
 	IOSurfaceRef _backBuffer;
 	id<MTLTexture> _backBufferTexture;
+
 	IOSurfaceRef _cachedDocumentView;
 	id<MTLTexture> _cachedDocumentViewTexture;
 	simd_float2 _documentViewSize;
 
+	id<MTLTexture> _subframeTexture;
+	id<MTLTexture> _accumulationTexture;
+
 	CGFloat _scrollOffset;
+	CGFloat _scrollOffsetLastDisplay;
 }
 
 + (instancetype)scrollViewWithAttributedString:(NSAttributedString *)attributedString {
@@ -33,18 +51,62 @@ struct Arguments {
 
 	scrollView->_device = MTLCreateSystemDefaultDevice();
 	scrollView->_commandQueue = [scrollView->_device newCommandQueue];
-	id<MTLLibrary> library = [scrollView->_device newDefaultLibrary];
-	MTLRenderPipelineDescriptor *descriptor = [[MTLRenderPipelineDescriptor alloc] init];
-	descriptor.vertexFunction = [library newFunctionWithName:@"VertexMain"];
-	descriptor.fragmentFunction = [library newFunctionWithName:@"FragmentMain"];
-	descriptor.colorAttachments[0].pixelFormat = MTLPixelFormatBGRA8Unorm;
-	descriptor.colorAttachments[0].blendingEnabled = YES;
-	descriptor.colorAttachments[0].destinationRGBBlendFactor = MTLBlendFactorOneMinusSourceAlpha;
-	descriptor.colorAttachments[0].destinationAlphaBlendFactor = MTLBlendFactorOneMinusSourceAlpha;
-	descriptor.colorAttachments[0].sourceRGBBlendFactor = MTLBlendFactorOne;
-	descriptor.colorAttachments[0].sourceAlphaBlendFactor = MTLBlendFactorOne;
-	scrollView->_pipelineState = [scrollView->_device newRenderPipelineStateWithDescriptor:descriptor error:nil];
 
+	id<MTLLibrary> library = [scrollView->_device newDefaultLibrary];
+
+	{
+		MTLRenderPipelineDescriptor *descriptor = [[MTLRenderPipelineDescriptor alloc] init];
+		descriptor.vertexFunction = [library newFunctionWithName:@"VertexMain"];
+		descriptor.fragmentFunction = [library newFunctionWithName:@"FragmentMain"];
+		descriptor.colorAttachments[0].pixelFormat = MTLPixelFormatBGRA8Unorm;
+		descriptor.colorAttachments[0].blendingEnabled = YES;
+		descriptor.colorAttachments[0].destinationRGBBlendFactor = MTLBlendFactorOneMinusSourceAlpha;
+		descriptor.colorAttachments[0].destinationAlphaBlendFactor = MTLBlendFactorOneMinusSourceAlpha;
+		descriptor.colorAttachments[0].sourceRGBBlendFactor = MTLBlendFactorOne;
+		descriptor.colorAttachments[0].sourceAlphaBlendFactor = MTLBlendFactorOne;
+		descriptor.colorAttachments[1].pixelFormat = MTLPixelFormatRGBA16Float;
+		descriptor.colorAttachments[2].pixelFormat = MTLPixelFormatBGRA8Unorm;
+		scrollView->_pipelineState = [scrollView->_device newRenderPipelineStateWithDescriptor:descriptor error:nil];
+	}
+
+	{
+		MTLTileRenderPipelineDescriptor *descriptor = [[MTLTileRenderPipelineDescriptor alloc] init];
+		descriptor.tileFunction = [library newFunctionWithName:@"Clear"];
+		descriptor.colorAttachments[0].pixelFormat = MTLPixelFormatBGRA8Unorm;
+		descriptor.colorAttachments[1].pixelFormat = MTLPixelFormatRGBA16Float;
+		descriptor.colorAttachments[2].pixelFormat = MTLPixelFormatBGRA8Unorm;
+		scrollView->_clearPipelineState =
+		        [scrollView->_device newRenderPipelineStateWithTileDescriptor:descriptor
+		                                                              options:MTLPipelineOptionNone
+		                                                           reflection:nil
+		                                                                error:nil];
+	}
+
+	{
+		MTLTileRenderPipelineDescriptor *descriptor = [[MTLTileRenderPipelineDescriptor alloc] init];
+		descriptor.tileFunction = [library newFunctionWithName:@"Accumulate"];
+		descriptor.colorAttachments[0].pixelFormat = MTLPixelFormatBGRA8Unorm;
+		descriptor.colorAttachments[1].pixelFormat = MTLPixelFormatRGBA16Float;
+		descriptor.colorAttachments[2].pixelFormat = MTLPixelFormatBGRA8Unorm;
+		scrollView->_accumulatePipelineState =
+		        [scrollView->_device newRenderPipelineStateWithTileDescriptor:descriptor
+		                                                              options:MTLPipelineOptionNone
+		                                                           reflection:nil
+		                                                                error:nil];
+	}
+
+	{
+		MTLTileRenderPipelineDescriptor *descriptor = [[MTLTileRenderPipelineDescriptor alloc] init];
+		descriptor.tileFunction = [library newFunctionWithName:@"Divide"];
+		descriptor.colorAttachments[0].pixelFormat = MTLPixelFormatBGRA8Unorm;
+		descriptor.colorAttachments[1].pixelFormat = MTLPixelFormatRGBA16Float;
+		descriptor.colorAttachments[2].pixelFormat = MTLPixelFormatBGRA8Unorm;
+		scrollView->_dividePipelineState =
+		        [scrollView->_device newRenderPipelineStateWithTileDescriptor:descriptor
+		                                                              options:MTLPipelineOptionNone
+		                                                           reflection:nil
+		                                                                error:nil];
+	}
 	return scrollView;
 }
 
@@ -86,6 +148,14 @@ struct Arguments {
 
 		_backBufferTexture = [_device newTextureWithDescriptor:descriptor iosurface:_backBuffer plane:0];
 		_backBufferTexture.label = @"Layer Backing Store";
+
+		descriptor.storageMode = MTLStorageModeMemoryless;
+		_subframeTexture = [_device newTextureWithDescriptor:descriptor];
+		_subframeTexture.label = @"Subframe Texture";
+
+		descriptor.pixelFormat = MTLPixelFormatRGBA16Float;
+		_accumulationTexture = [_device newTextureWithDescriptor:descriptor];
+		_accumulationTexture.label = @"Accumulation Texture";
 	}
 
 	long desiredDocumentViewWidth = (long)sizeNS.width;
@@ -158,34 +228,68 @@ struct Arguments {
 	id<MTLCommandBuffer> commandBuffer = [_commandQueue commandBuffer];
 
 	NSColor *backgroundColorNS = [NSColor.controlBackgroundColor colorUsingColorSpace:NSColorSpace.deviceRGBColorSpace];
-	simd_double4 rgba = 0;
-	rgba.r = backgroundColorNS.redComponent;
-	rgba.g = backgroundColorNS.greenComponent;
-	rgba.b = backgroundColorNS.blueComponent;
-	rgba.a = backgroundColorNS.alphaComponent;
-	rgba.rgb *= rgba.a;
-	MTLClearColor clearColor = {rgba.r, rgba.g, rgba.b, rgba.a};
+	simd_float4 backgroundColor = 0;
+	backgroundColor.r = (float)backgroundColorNS.redComponent;
+	backgroundColor.g = (float)backgroundColorNS.greenComponent;
+	backgroundColor.b = (float)backgroundColorNS.blueComponent;
+	backgroundColor.a = (float)backgroundColorNS.alphaComponent;
+	backgroundColor.rgb *= backgroundColor.a;
 
 	MTLRenderPassDescriptor *descriptor = [[MTLRenderPassDescriptor alloc] init];
-	descriptor.colorAttachments[0].texture = _backBufferTexture;
-	descriptor.colorAttachments[0].loadAction = MTLLoadActionClear;
-	descriptor.colorAttachments[0].clearColor = clearColor;
+
+	descriptor.colorAttachments[0].texture = _subframeTexture;
+	descriptor.colorAttachments[0].loadAction = MTLLoadActionDontCare;
+	descriptor.colorAttachments[0].storeAction = MTLStoreActionDontCare;
+
+	descriptor.colorAttachments[1].texture = _accumulationTexture;
+	descriptor.colorAttachments[1].loadAction = MTLLoadActionClear;
+	descriptor.colorAttachments[1].storeAction = MTLStoreActionDontCare;
+	descriptor.colorAttachments[1].clearColor = (MTLClearColor){0};
+
+	descriptor.colorAttachments[2].texture = _backBufferTexture;
+	descriptor.colorAttachments[2].loadAction = MTLLoadActionDontCare;
+	descriptor.colorAttachments[2].storeAction = MTLStoreActionStore;
 
 	id<MTLRenderCommandEncoder> encoder = [commandBuffer renderCommandEncoderWithDescriptor:descriptor];
 
-	[encoder setRenderPipelineState:_pipelineState];
-
-	Arguments arguments = {0};
-	arguments.documentViewTexture = _cachedDocumentViewTexture.gpuResourceID;
-	arguments.documentViewOrigin.y = scaleFactor * (float)_scrollOffset;
-	arguments.documentViewSize.x = _cachedDocumentViewTexture.width;
-	arguments.documentViewSize.y = _cachedDocumentViewTexture.height;
-	arguments.resolution = sizePixelsFloat;
-
 	[encoder useResource:_cachedDocumentViewTexture usage:MTLResourceUsageRead stages:MTLRenderStageFragment];
-	[encoder setVertexBytes:&arguments length:sizeof(arguments) atIndex:0];
-	[encoder setFragmentBytes:&arguments length:sizeof(arguments) atIndex:0];
-	[encoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:6];
+	NSInteger subframeCount = 10;
+
+	for (NSInteger subframeIndex = 0; subframeIndex < subframeCount; subframeIndex++) {
+		{
+			[encoder setRenderPipelineState:_clearPipelineState];
+			ClearArguments arguments = {0};
+			arguments.clearColor = backgroundColor;
+			[encoder setTileBytes:&arguments length:sizeof(arguments) atIndex:0];
+			[encoder dispatchThreadsPerTile:(MTLSize){encoder.tileWidth, encoder.tileHeight, 1}];
+		}
+
+		float fractionThrough = (float)subframeIndex / (float)subframeCount;
+		float subframeScrollOffset = simd_mix((float)_scrollOffsetLastDisplay, (float)_scrollOffset, fractionThrough);
+		subframeScrollOffset *= scaleFactor;
+
+		[encoder setRenderPipelineState:_pipelineState];
+
+		Arguments arguments = {0};
+		arguments.documentViewTexture = _cachedDocumentViewTexture.gpuResourceID;
+		arguments.documentViewOrigin.y = subframeScrollOffset;
+		arguments.documentViewSize.x = _cachedDocumentViewTexture.width;
+		arguments.documentViewSize.y = _cachedDocumentViewTexture.height;
+		arguments.resolution = sizePixelsFloat;
+
+		[encoder setVertexBytes:&arguments length:sizeof(arguments) atIndex:0];
+		[encoder setFragmentBytes:&arguments length:sizeof(arguments) atIndex:0];
+		[encoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:6];
+
+		[encoder setRenderPipelineState:_accumulatePipelineState];
+		[encoder dispatchThreadsPerTile:(MTLSize){encoder.tileWidth, encoder.tileHeight, 1}];
+	}
+
+	[encoder setRenderPipelineState:_dividePipelineState];
+	DivideArguments arguments = {0};
+	arguments.subframeCount = subframeCount;
+	[encoder setTileBytes:&arguments length:sizeof(arguments) atIndex:0];
+	[encoder dispatchThreadsPerTile:(MTLSize){encoder.tileWidth, encoder.tileHeight, 1}];
 
 	[encoder endEncoding];
 
@@ -199,6 +303,8 @@ struct Arguments {
 	_backBuffer = tmp;
 	_backBufferTexture = tmpTexture;
 	self.layer.contents = (__bridge id)_frontBuffer;
+
+	_scrollOffsetLastDisplay = _scrollOffset;
 }
 
 - (void)scrollWheel:(NSEvent *)event {

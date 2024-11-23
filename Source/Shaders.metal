@@ -43,3 +43,32 @@ fragment float4 FragmentMain(RasterizerData input [[stage_in]], constant Argumen
 	constexpr sampler s(filter::nearest);
 	return arguments.documentViewTexture.sample(s, input.textureCoordinates);
 }
+
+struct Fragment {
+	float4 subframeColor [[color(0)]];
+	float4 accumulationColor [[color(1)]];
+	float4 outputColor [[color(2)]];
+};
+
+struct ClearArguments {
+	float4 clearColor;
+};
+
+fragment Fragment Clear(Fragment frag, constant ClearArguments &arguments) {
+	frag.subframeColor = arguments.clearColor;
+	return frag;
+}
+
+fragment Fragment Accumulate(Fragment frag) {
+	frag.accumulationColor += frag.subframeColor;
+	return frag;
+}
+
+struct DivideArguments {
+	float subframeCount;
+};
+
+fragment Fragment Divide(Fragment frag, constant DivideArguments &arguments) {
+	frag.outputColor = frag.accumulationColor / arguments.subframeCount;
+	return frag;
+}
